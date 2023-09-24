@@ -23,6 +23,7 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include "math.h"
+#include <stdlib.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -32,7 +33,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define min(a,b) (((a) < (b)) ? (a) : (b))
+#define max(a,b) (((a) > (b)) ? (a) : (b))
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -69,6 +71,8 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 	counter = __HAL_TIM_GET_COUNTER(htim);
 }*/
 
+int rpm = 0;
+
 int16_t read_encoder_value(void)
 {
   int16_t enc_buff = TIM1->CNT;
@@ -93,7 +97,7 @@ int main(void)
   /* USER CODE BEGIN 1 */
   setbuf(stdout, NULL);
   int16_t count;
-  char usr_buf[1000];
+  int ei = 0;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -131,18 +135,6 @@ int main(void)
 	uint8_t button_state0 = HAL_GPIO_ReadPin(SW0_GPIO_Port,SW0_Pin);
 	uint8_t button_state1 = HAL_GPIO_ReadPin(SW1_GPIO_Port,SW1_Pin);
 
-	if (button_state0 == 1) {
-		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 255);
-	} else {
-		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
-	}
-
-	if (button_state1 == 1) {
-		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 255);
-	} else {
-		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
-	}
-
     count = read_encoder_value();
     int PPR = 7;
     int gear_ratio = 100;
@@ -150,10 +142,44 @@ int main(void)
     int period = 65535;
     int frequency = 8000000;
     double interval = (double) 1.0 / ((double) frequency / ((double) prescaler * period));
-    int rpm = (60 * count) / (interval * PPR * gear_ratio);
+    rpm = (60 * count) / (interval * PPR * gear_ratio);
 
     printf("rpm: %d\n\r", rpm);
     // printf("Encoder: %d\n\r", count);
+
+    int kp = 1;
+    int ki = 1;
+    int ff = 100;
+    int target = 100;
+    int e = target - abs(rpm);
+    ei += e;
+    ei = max(min(ei, 300), -300);
+    // printf("e: %d\n\r", e);
+    // printf("ei: %d\n\r", ei);
+    int input = max(min(255, kp * e + ki * ei + ff), 0);
+	if (button_state0 == 1) {
+		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, input);
+		/*
+		if (abs(rpm) < 100) {
+			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 255);
+		} else {
+			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+		}*/
+	} else {
+		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+	}
+
+	if (button_state1 == 1) {
+		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, input);
+		/*
+		if (abs(rpm) < 100) {
+			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 255);
+		} else {
+			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
+		}*/
+	} else {
+		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
+	}
 
     // sprintf(usr_buf, "Encoder: %d\n\r", count);
     // CDC_Transmit_FS((uint8_t *)usr_buf, strlen(usr_buf));
