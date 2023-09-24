@@ -62,6 +62,13 @@ static void MX_TIM1_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+/*
+int16_t counter;
+void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
+{
+	counter = __HAL_TIM_GET_COUNTER(htim);
+}*/
+
 int16_t read_encoder_value(void)
 {
   int16_t enc_buff = TIM1->CNT;
@@ -85,7 +92,7 @@ int main(void)
 {
   /* USER CODE BEGIN 1 */
   setbuf(stdout, NULL);
-  uint16_t count;
+  int16_t count;
   char usr_buf[1000];
   /* USER CODE END 1 */
 
@@ -111,7 +118,8 @@ int main(void)
   MX_USART2_UART_Init();
   MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
-  HAL_TIM_Encoder_Start(&htim1, TIM_CHANNEL_ALL);
+  HAL_TIM_Encoder_Start(&htim1, TIM_CHANNEL_1);
+  HAL_TIM_Encoder_Start(&htim1, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
   /* USER CODE END 2 */
@@ -135,8 +143,18 @@ int main(void)
 		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
 	}
 
-    count += read_encoder_value();
-    printf("Encoder: %d\n\r", count);
+    count = read_encoder_value();
+    int PPR = 7;
+    int gear_ratio = 100;
+    int prescaler = 1;
+    int period = 65535;
+    int frequency = 8000000;
+    double interval = (double) 1.0 / ((double) frequency / ((double) prescaler * period));
+    int rpm = (60 * count) / (interval * PPR * gear_ratio);
+
+    printf("rpm: %d\n\r", rpm);
+    // printf("Encoder: %d\n\r", count);
+
     // sprintf(usr_buf, "Encoder: %d\n\r", count);
     // CDC_Transmit_FS((uint8_t *)usr_buf, strlen(usr_buf));
     // HAL_Delay(100);
@@ -207,7 +225,7 @@ static void MX_TIM1_Init(void)
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  sConfig.EncoderMode = TIM_ENCODERMODE_TI1;
+  sConfig.EncoderMode = TIM_ENCODERMODE_TI12;
   sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
   sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
   sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
