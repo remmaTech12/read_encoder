@@ -45,6 +45,7 @@
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim3;
+TIM_HandleTypeDef htim6;
 
 UART_HandleTypeDef huart2;
 
@@ -58,6 +59,7 @@ static void MX_GPIO_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM1_Init(void);
+static void MX_TIM6_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -71,13 +73,14 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 	counter = __HAL_TIM_GET_COUNTER(htim);
 }*/
 
-int rpm = 0;
+int measured_rpm_ = 0;
+int ei_ = 0;
 
-int16_t read_encoder_value(void)
+int16_t read_encoder_count(void)
 {
   int16_t enc_buff = TIM1->CNT;
   TIM1->CNT = 0;
-  if (enc_buff > 32767)
+  if (enc_buff > htim1.Init.Period/2)
   {
     return (int16_t)enc_buff * -1;
   }
@@ -85,6 +88,73 @@ int16_t read_encoder_value(void)
   {
     return (int16_t)enc_buff;
   }
+}
+
+void calculate_rpm(int16_t timer_count)
+{
+	// motor specification
+	const int PPR = 7;
+	const int gear_ratio = 100;
+
+	// timer specification
+	const int prescaler = htim1.Init.Prescaler + 1;
+	const int period = htim1.Init.Period;
+	const int frequency = 8000000;
+	const double interval = (double) 1.0 / ((double) frequency / ((double) prescaler * period));
+
+	// rpm calculation
+	measured_rpm_ = (60 * timer_count) / (interval * PPR * gear_ratio);
+}
+
+int16_t calculate_pid_cmd(int16_t target_rpm)
+{
+	// pid gain and parameter
+  	const int kp = 1;
+  	const int ki = 1;
+  	const int ff = 100;
+  	const int max_ei  = 300;
+  	const int max_cmd = 255;
+
+  	// deviation calculation
+  	int e = target_rpm - abs(measured_rpm_);
+  	ei_ += e;
+  	ei_ = max(min(ei_, max_ei), -max_ei);
+
+  	// command calculation
+  	int cmd = kp * e + ki * ei_ + ff;
+  	cmd = max(min(max_cmd, cmd), 0);
+
+  	return cmd;
+}
+
+void control_motor_when_button_pressed()
+{
+	// check button states
+	uint8_t button_state0 = HAL_GPIO_ReadPin(SW0_GPIO_Port,SW0_Pin);
+  	uint8_t button_state1 = HAL_GPIO_ReadPin(SW1_GPIO_Port,SW1_Pin);
+
+  	// calculate pid command
+  	int target_rpm = button_state0 != button_state1 ? 60 : 0;
+  	int cmd = calculate_pid_cmd(target_rpm);
+
+  	// blue button: clockwise
+  	if (button_state0 == 1) __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, cmd);
+  	else __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+
+  	// red button: counter-clockwise
+  	if (button_state1 == 1) __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, cmd);
+  	else __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+	if ( htim == &htim1 )
+	{
+	}
+    if ( htim == &htim6 )
+    {
+    	control_motor_when_button_pressed();
+    }
 }
 /* USER CODE END 0 */
 
@@ -96,8 +166,6 @@ int main(void)
 {
   /* USER CODE BEGIN 1 */
   setbuf(stdout, NULL);
-  int16_t count;
-  int ei = 0;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -121,69 +189,22 @@ int main(void)
   MX_TIM3_Init();
   MX_USART2_UART_Init();
   MX_TIM1_Init();
+  MX_TIM6_Init();
   /* USER CODE BEGIN 2 */
   HAL_TIM_Encoder_Start(&htim1, TIM_CHANNEL_1);
   HAL_TIM_Encoder_Start(&htim1, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+  HAL_TIM_Base_Start_IT(&htim6);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	uint8_t button_state0 = HAL_GPIO_ReadPin(SW0_GPIO_Port,SW0_Pin);
-	uint8_t button_state1 = HAL_GPIO_ReadPin(SW1_GPIO_Port,SW1_Pin);
-
-    count = read_encoder_value();
-    int PPR = 7;
-    int gear_ratio = 100;
-    int prescaler = 1;
-    int period = 65535;
-    int frequency = 8000000;
-    double interval = (double) 1.0 / ((double) frequency / ((double) prescaler * period));
-    rpm = (60 * count) / (interval * PPR * gear_ratio);
-
-    printf("rpm: %d\n\r", rpm);
-    // printf("Encoder: %d\n\r", count);
-
-    int kp = 1;
-    int ki = 1;
-    int ff = 100;
-    int target = 100;
-    int e = target - abs(rpm);
-    ei += e;
-    ei = max(min(ei, 300), -300);
-    // printf("e: %d\n\r", e);
-    // printf("ei: %d\n\r", ei);
-    int input = max(min(255, kp * e + ki * ei + ff), 0);
-	if (button_state0 == 1) {
-		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, input);
-		/*
-		if (abs(rpm) < 100) {
-			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 255);
-		} else {
-			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
-		}*/
-	} else {
-		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
-	}
-
-	if (button_state1 == 1) {
-		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, input);
-		/*
-		if (abs(rpm) < 100) {
-			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 255);
-		} else {
-			__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
-		}*/
-	} else {
-		__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
-	}
-
-    // sprintf(usr_buf, "Encoder: %d\n\r", count);
-    // CDC_Transmit_FS((uint8_t *)usr_buf, strlen(usr_buf));
-    // HAL_Delay(100);
+	  int16_t enc_count = read_encoder_count();
+	  calculate_rpm(enc_count);
+	  printf("%d\n\r", measured_rpm_);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -336,6 +357,36 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 2 */
   HAL_TIM_MspPostInit(&htim3);
+
+}
+
+/**
+  * @brief TIM6 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM6_Init(void)
+{
+
+  /* USER CODE BEGIN TIM6_Init 0 */
+
+  /* USER CODE END TIM6_Init 0 */
+
+  /* USER CODE BEGIN TIM6_Init 1 */
+
+  /* USER CODE END TIM6_Init 1 */
+  htim6.Instance = TIM6;
+  htim6.Init.Prescaler = 0;
+  htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim6.Init.Period = 65535;
+  htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM6_Init 2 */
+
+  /* USER CODE END TIM6_Init 2 */
 
 }
 
