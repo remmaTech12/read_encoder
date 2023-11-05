@@ -66,21 +66,19 @@ static void MX_TIM6_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-/*
 int16_t counter;
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 {
-	counter = __HAL_TIM_GET_COUNTER(htim);
-}*/
+}
 
 int measured_rpm_ = 0;
 int ei_ = 0;
 
 int16_t read_encoder_count(void)
 {
-  int16_t enc_buff = TIM1->CNT;
-  TIM1->CNT = 0;
-  if (enc_buff > htim1.Init.Period/2)
+  int16_t enc_buff = TIM3->CNT;
+  TIM3->CNT = 0;
+  if (enc_buff > (int)htim3.Init.Period/2)
   {
     return (int16_t)enc_buff * -1;
   }
@@ -94,16 +92,19 @@ void calculate_rpm(int16_t timer_count)
 {
 	// motor specification
 	const int PPR = 7;
+	const int encoder_num = 2;
 	const int gear_ratio = 100;
 
 	// timer specification
-	const int prescaler = htim1.Init.Prescaler + 1;
-	const int period = htim1.Init.Period;
+	const int prescaler = htim6.Init.Prescaler + 1;
+	const int period = htim6.Init.Period + 1;
 	const int frequency = 8000000;
-	const double interval = (double) 1.0 / ((double) frequency / ((double) prescaler * period));
+	const double actual_frequency = (double) frequency / ((double) prescaler * period);
+	const double interval = 1.0 / actual_frequency;
 
 	// rpm calculation
-	measured_rpm_ = (60 * timer_count) / (interval * PPR * gear_ratio);
+	const double timer_count_in_1s = (double) timer_count / interval;
+	measured_rpm_ = (60 * timer_count_in_1s) / (PPR * encoder_num * gear_ratio);
 }
 
 int16_t calculate_pid_cmd(int16_t target_rpm)
@@ -138,23 +139,29 @@ void control_motor_when_button_pressed()
   	int cmd = calculate_pid_cmd(target_rpm);
 
   	// blue button: clockwise
-  	if (button_state0 == 1) __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, cmd);
-  	else __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
+  	if (button_state0 == 1) __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, cmd);
+  	else __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 0);
 
   	// red button: counter-clockwise
-  	if (button_state1 == 1) __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, cmd);
-  	else __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
+  	if (button_state1 == 1) __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, cmd);
+  	else __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 0);
 }
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-	if ( htim == &htim1 )
-	{
-	}
-    if ( htim == &htim6 )
+	if ( htim == &htim6 )
     {
-    	control_motor_when_button_pressed();
+		int16_t enc_count = read_encoder_count();
+		calculate_rpm(enc_count);
+		printf("%d\n\r", measured_rpm_);
+		control_motor_when_button_pressed();
     }
+}
+
+void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  if((htim->Instance == TIM1)) {
+  }
 }
 /* USER CODE END 0 */
 
@@ -191,10 +198,12 @@ int main(void)
   MX_TIM1_Init();
   MX_TIM6_Init();
   /* USER CODE BEGIN 2 */
-  HAL_TIM_Encoder_Start(&htim1, TIM_CHANNEL_1);
-  HAL_TIM_Encoder_Start(&htim1, TIM_CHANNEL_2);
-  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
-  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+  HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
+  HAL_TIM_IC_Start_IT(&htim3, TIM_CHANNEL_ALL);
+  //HAL_TIM_OC_Start_IT(&htim3, TIM_CHANNEL_1);
+  //HAL_TIM_Base_Start_IT(&htim3);
   HAL_TIM_Base_Start_IT(&htim6);
   /* USER CODE END 2 */
 
@@ -202,9 +211,6 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  int16_t enc_count = read_encoder_count();
-	  calculate_rpm(enc_count);
-	  printf("%d\n\r", measured_rpm_);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -259,8 +265,9 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 0 */
 
-  TIM_Encoder_InitTypeDef sConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+  TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig = {0};
 
   /* USER CODE BEGIN TIM1_Init 1 */
 
@@ -268,20 +275,11 @@ static void MX_TIM1_Init(void)
   htim1.Instance = TIM1;
   htim1.Init.Prescaler = 0;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 65535;
+  htim1.Init.Period = 255;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  sConfig.EncoderMode = TIM_ENCODERMODE_TI12;
-  sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
-  sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
-  sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC1Filter = 0;
-  sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
-  sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
-  sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
-  sConfig.IC2Filter = 0;
-  if (HAL_TIM_Encoder_Init(&htim1, &sConfig) != HAL_OK)
+  if (HAL_TIM_PWM_Init(&htim1) != HAL_OK)
   {
     Error_Handler();
   }
@@ -291,9 +289,36 @@ static void MX_TIM1_Init(void)
   {
     Error_Handler();
   }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
+  sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
+  if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
+  sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
+  sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
+  sBreakDeadTimeConfig.DeadTime = 0;
+  sBreakDeadTimeConfig.BreakState = TIM_BREAK_DISABLE;
+  sBreakDeadTimeConfig.BreakPolarity = TIM_BREAKPOLARITY_HIGH;
+  sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_DISABLE;
+  if (HAL_TIMEx_ConfigBreakDeadTime(&htim1, &sBreakDeadTimeConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
   /* USER CODE BEGIN TIM1_Init 2 */
 
   /* USER CODE END TIM1_Init 2 */
+  HAL_TIM_MspPostInit(&htim1);
 
 }
 
@@ -309,9 +334,8 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 0 */
 
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_Encoder_InitTypeDef sConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
-  TIM_OC_InitTypeDef sConfigOC = {0};
 
   /* USER CODE BEGIN TIM3_Init 1 */
 
@@ -319,19 +343,19 @@ static void MX_TIM3_Init(void)
   htim3.Instance = TIM3;
   htim3.Init.Prescaler = 0;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 255;
+  htim3.Init.Period = 65535;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
+  sConfig.EncoderMode = TIM_ENCODERMODE_TI1;
+  sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC1Filter = 0;
+  sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC2Filter = 0;
+  if (HAL_TIM_Encoder_Init(&htim3, &sConfig) != HAL_OK)
   {
     Error_Handler();
   }
@@ -341,22 +365,9 @@ static void MX_TIM3_Init(void)
   {
     Error_Handler();
   }
-  sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 0;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
-  {
-    Error_Handler();
-  }
   /* USER CODE BEGIN TIM3_Init 2 */
 
   /* USER CODE END TIM3_Init 2 */
-  HAL_TIM_MspPostInit(&htim3);
 
 }
 
@@ -376,9 +387,9 @@ static void MX_TIM6_Init(void)
 
   /* USER CODE END TIM6_Init 1 */
   htim6.Instance = TIM6;
-  htim6.Init.Prescaler = 0;
+  htim6.Init.Prescaler = 9;
   htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim6.Init.Period = 65535;
+  htim6.Init.Period = 7999;
   htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
   {
