@@ -66,11 +66,6 @@ static void MX_TIM6_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-int16_t counter;
-void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
-{
-}
-
 int measured_rpm_ = 0;
 int ei_ = 0;
 
@@ -98,13 +93,13 @@ void calculate_rpm(int16_t timer_count)
 	// timer specification
 	const int prescaler = htim6.Init.Prescaler + 1;
 	const int period = htim6.Init.Period + 1;
-	const int frequency = 8000000;
+	const int frequency = HAL_RCC_GetPCLK1Freq();
 	const double actual_frequency = (double) frequency / ((double) prescaler * period);
 	const double interval = 1.0 / actual_frequency;
 
 	// rpm calculation
 	const double timer_count_in_1s = (double) timer_count / interval;
-	measured_rpm_ = (60 * timer_count_in_1s) / (PPR * encoder_num * gear_ratio);
+	measured_rpm_ = (60 * timer_count_in_1s) / (PPR * gear_ratio * encoder_num);
 }
 
 int16_t calculate_pid_cmd(int16_t target_rpm)
@@ -147,6 +142,14 @@ void control_motor_when_button_pressed()
   	else __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 0);
 }
 
+void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
+{
+}
+
+void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim)
+{
+}
+
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
 	if ( htim == &htim6 )
@@ -156,12 +159,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		printf("%d\n\r", measured_rpm_);
 		control_motor_when_button_pressed();
     }
-}
-
-void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim)
-{
-  if((htim->Instance == TIM1)) {
-  }
 }
 /* USER CODE END 0 */
 
