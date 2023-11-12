@@ -68,21 +68,14 @@ static void MX_TIM6_Init(void);
 /* USER CODE BEGIN 0 */
 int ei_ = 0;
 
-int16_t read_encoder_count(void)
+int read_encoder_count(void)
 {
-  int16_t enc_buff = TIM3->CNT;
+  int enc_buff = (int16_t) TIM3->CNT;
   TIM3->CNT = 0;
-  if (enc_buff > (int) htim3.Init.Period/2)
-  {
-    return (int16_t) enc_buff * -1;
-  }
-  else
-  {
-    return (int16_t) enc_buff;
-  }
+  return enc_buff;
 }
 
-int calculate_rpm(int16_t timer_count)
+int calculate_rpm(int timer_count)
 {
 	// motor specification
 	const int PPR = 7;
@@ -102,7 +95,7 @@ int calculate_rpm(int16_t timer_count)
 	return measured_rpm;
 }
 
-int calculate_pid_cmd(int16_t target_rpm, int16_t measured_rpm)
+int calculate_pid_cmd(int target_rpm, int measured_rpm)
 {
 	// pid gain and parameter
   	const int kp = 1;
@@ -154,9 +147,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
 	if ( htim == &htim6 )
     {
-		int16_t enc_count = read_encoder_count();
-		int measured_rpm = calculate_rpm(enc_count);
+		int enc_count = read_encoder_count();
 		int target_rpm = 60;
+		int measured_rpm = calculate_rpm(enc_count);
 		printf("%d\n\r", measured_rpm);
 
 		control_motor_when_button_pressed(target_rpm, measured_rpm);
